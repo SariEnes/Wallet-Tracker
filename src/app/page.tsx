@@ -1,65 +1,150 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useCallback, useMemo } from 'react';
+import AddressInput from '@/components/wallet/AddressInput';
+import WalletGrid from '@/components/wallet/WalletGrid';
+import WalletDetail from '@/components/wallet/WalletDetail';
+import { useWalletData } from '@/hooks/useWalletData';
+import { usePrices } from '@/hooks/usePrices';
+import { useAuth } from '@/hooks/useAuth';
+import { useWatchlists } from '@/hooks/useWatchlists';
+import { formatUsd } from '@/lib/utils/format';
+import type { WalletData } from '@/types';
+import AddToWatchlist from '@/components/watchlist/AddToWatchlist';
 
 export default function Home() {
+  const { wallets, loading, error, scan } = useWalletData();
+  const [selectedWallet, setSelectedWallet] = useState<WalletData | null>(null);
+
+  const { connected, publicKey } = useAuth();
+  const { watchlists, selectedId, createList, addWalletToList } = useWatchlists(publicKey);
+
+  // Collect all unique token codes across wallets for price fetching
+  const tokenCodes = useMemo(
+    () => [...new Set(wallets.flatMap((w) => w.tokens.map((t) => t.code)))],
+    [wallets]
+  );
+
+  const { xlmPrice, loading: priceLoading, error: priceError } = usePrices(tokenCodes);
+
+  // Portfolio total: sum of all wallet XLM balances in USD
+  const portfolioTotal = useMemo(() => {
+    if (xlmPrice === null || wallets.length === 0) return null;
+    return wallets
+      .filter((w) => w.isValid)
+      .reduce((sum, w) => sum + parseFloat(w.nativeBalance) * xlmPrice, 0);
+  }, [wallets, xlmPrice]);
+
+  const handleDetail = useCallback((wallet: WalletData) => {
+    setSelectedWallet(wallet);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    setSelectedWallet(null);
+  }, []);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+      {/* Hero */}
+      <div className="mb-10 text-center">
+        <h1 className="text-4xl font-bold tracking-tight text-slate-100 sm:text-5xl">
+          Stellar Wallet Tracker
+        </h1>
+        <p className="mt-4 text-lg text-slate-400">
+          Paste one or more Stellar wallet addresses to instantly view balances,
+          tokens, NFTs, and transaction history.
+        </p>
+        <div className="mt-2 flex items-center justify-center gap-3 text-sm text-slate-500">
+          <span>Read-only · No wallet connection required · Testnet</span>
+          {/* Live XLM price indicator */}
+          <span className="text-slate-700">·</span>
+          {priceLoading ? (
+            <span className="animate-pulse text-slate-600">Loading price…</span>
+          ) : priceError ? (
+            <span className="text-red-500/70" title={priceError}>Price unavailable</span>
+          ) : xlmPrice !== null ? (
+            <span className="text-slate-400">
+              XLM{' '}
+              <span className="font-medium text-slate-300">
+                {formatUsd(xlmPrice)}
+              </span>
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Address Input */}
+      <AddressInput
+        onScan={scan}
+        loading={loading}
+        error={error}
+        resultCount={wallets.length > 0 ? wallets.length : undefined}
+      />
+
+      {/* Portfolio total bar */}
+      {portfolioTotal !== null && wallets.length > 0 && (
+        <div className="mx-auto mt-6 max-w-3xl rounded-lg border border-slate-700/50 bg-slate-800/50 px-5 py-3">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-400">
+              Total portfolio value ({wallets.filter((w) => w.isValid).length} wallets)
+            </span>
+            <div className="flex items-center gap-4">
+              {connected && (
+                <AddToWatchlist
+                  wallets={wallets}
+                  watchlists={watchlists}
+                  selectedWatchlistId={selectedId}
+                  onAdd={addWalletToList}
+                  onCreate={createList}
+                />
+              )}
+              <span className="text-xl font-bold text-slate-100">
+                {formatUsd(portfolioTotal)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wallet Grid */}
+      <WalletGrid
+        wallets={wallets}
+        loading={loading}
+        skeletonCount={3}
+        onDetail={handleDetail}
+        xlmPrice={xlmPrice}
+      />
+
+      {/* Empty state */}
+      {wallets.length === 0 && !loading && !error && (
+        <div className="mt-16 text-center">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={1}
+            stroke="currentColor"
+            className="mx-auto mb-3 h-16 w-16 text-slate-700"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18-3a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3m18 0H3"
+            />
+          </svg>
+          <p className="text-sm text-slate-600">
+            Paste wallet addresses above and click{' '}
+            <strong className="text-slate-500">Scan</strong> to see results
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      )}
+
+      {/* Detail panel */}
+      <WalletDetail
+        wallet={selectedWallet}
+        onClose={handleClose}
+        xlmPrice={xlmPrice}
+      />
     </div>
   );
 }
